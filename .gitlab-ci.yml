@@ -1,0 +1,81 @@
+stages:
+  - copy-deploy-conf # dev/prod
+  - test
+  - build
+  - release
+  - deploy # dev/prod
+
+cache: &global_cache
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - node_modules/
+    - .npm/
+
+variables:
+  TEST_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+  RELEASE_IMAGE: $CI_REGISTRY_IMAGE:latest
+
+before_script:
+  - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
+
+################################  CONFIG DEV/PROD  #####################################
+copy:
+  stage: copy-deploy-conf
+  before_script:
+    - chmod +x config/scripts/is-valid-infra.sh config/scripts/pre-copy-config.sh config/scripts/copy-config.sh
+    - config/scripts/pre-copy-config.sh
+  script:
+    - config/scripts/is-valid-infra.sh
+    - config/scripts/copy-config.sh
+  rules:
+    - changes:
+        - config/**/*
+################################  TEST  #########################################
+test:
+  stage: test
+  before_script:
+    - apk add openssh-client
+    - chmod +x ./config/scripts/is-valid-infra.sh ./config/scripts/pre-copy.sh
+  script:
+    - echo "beep,boop, stop being lazy!"
+  rules:
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+################################  BUILD  #########################################
+build:
+  stage: build
+  script:
+    - docker build -t $TEST_IMAGE -f config/docker/Dockerfile . --network host
+    - docker push $TEST_IMAGE
+  rules:
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+################################  RELEASE  #######################################
+release:
+  stage: release
+  script:
+    - docker pull $TEST_IMAGE
+    - docker tag $TEST_IMAGE $RELEASE_IMAGE
+    - docker push $RELEASE_IMAGE
+  only:
+    - develop
+    - master
+################################  DEPLOY DEV/PROD  #####################################
+dev:
+  stage: deploy
+  script:
+    - cd /home/elnodetank/config/scripts
+    - ./scripts/deploy.sh
+  tags:
+    - dev
+  only:
+    refs:
+      - develop
+prod:
+  stage: deploy
+  script:
+    - cd /home/elnodetank/config/scripts
+    - ./scripts/deploy.sh
+  tags:
+    - prod
+  only:
+    refs:
+      - master

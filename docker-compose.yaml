@@ -1,0 +1,145 @@
+version: '3.7'
+
+services:
+  nginx:
+    restart: always
+    build:
+      context: .
+      dockerfile: config/docker/Dockerfile.nginx
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+    networks:
+      - nodetank-net
+
+  api:
+    build:
+      context: .
+      dockerfile: config/docker/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - envs/.env
+    ports:
+      - 3001:3001
+    networks:
+      - nodetank-net
+    depends_on:
+      - database
+      - redis
+
+  database:
+    image: postgres:14.2-alpine3.15
+    env_file:
+      - envs/.env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - 5432:5432
+    networks:
+      - nodetank-net
+
+  metabase:
+    image: metabase/metabase
+    restart: always
+    env_file:
+      - envs/.env
+    environment:
+      MB_DB_TYPE: 'postgres'
+      MB_DB_PORT: '5432'
+      MB_DB_HOST: 'database'
+    ports:
+      - '3002:3000'
+    volumes:
+      - './mb-data'
+    depends_on:
+      - 'database'
+    networks:
+      - nodetank-net
+
+  redis:
+    image: redis:6-alpine
+    ports:
+      - 6379:6379
+    depends_on:
+      - database
+    networks:
+      - nodetank-net
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    ports:
+      - '3000:3000'
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - nodetank-net
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - '9090:9090'
+    volumes:
+      - /etc/prometheus:/etc/prometheus
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    networks:
+      - nodetank-net
+
+  cadvisor:
+    image: google/cadvisor:latest
+    container_name: cadvisor
+    ports:
+      - '8081:8081'
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    devices:
+      - /dev/kmsg
+    restart: unless-stopped
+    networks:
+      - nodetank-net
+
+  node_exporter:
+    image: quay.io/prometheus/node-exporter:latest
+    container_name: node_exporter
+    command:
+      - '--path.rootfs=/host'
+    pid: host
+    restart: unless-stopped
+    volumes:
+      - '/:/host:ro,rslave'
+    networks:
+      - nodetank-net
+
+  maildev:
+    build:
+      context: .
+      dockerfile: config/docker/Dockerfile.maildev
+    env_file:
+      - envs/.env
+    networks:
+      - nodetank-net
+
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 8081:8081
+    networks:
+      - nodetank-net
+
+networks:
+  nodetank-net:
+
+
+volumes:
+  postgres_data:
+  grafana-data:
+    driver: local
+  prometheus-data:
+    driver: local
